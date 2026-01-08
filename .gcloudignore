@@ -1,0 +1,24 @@
+# Python
+venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# Data (will be in container already)
+data/*.pdf
+
+# Git
+.git/
+.github/
+
+# IDE
+.vscode/
+.idea/
+
+# Local files
+*.log
+.env
+.DS_Store
+
+# README (not needed in deployment)
+README.md

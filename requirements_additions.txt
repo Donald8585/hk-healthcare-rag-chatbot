@@ -1,0 +1,2 @@
+# Add to requirements.txt:
+streamlit==1.41.1
