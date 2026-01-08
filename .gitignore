@@ -1,0 +1,21 @@
+# Python
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Vector DB
+chroma_db/
+
+# Data files (too large for GitHub)
+data/*.pdf
+
+# Environment
+.env
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
