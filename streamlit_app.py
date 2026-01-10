@@ -51,16 +51,16 @@ with st.sidebar:
     model_choice = st.selectbox(
         "LLM Model",
         [
-            "mistralai/Mistral-7B-Instruct-v0.2",
-            "meta-llama/Llama-2-7b-chat-hf",
+            "microsoft/Phi-3-mini-4k-instruct",
             "HuggingFaceH4/zephyr-7b-beta",
-            "google/flan-t5-xxl"
+            "google/flan-t5-large",
+            "mistralai/Mixtral-8x7B-Instruct-v0.1"
         ],
-        help="All FREE on HuggingFace!"
+        help="Models that work on FREE HuggingFace Inference API!"
     )
 
     temperature = st.slider("Temperature", 0.0, 1.0, 0.3, 0.1)
-    max_tokens = st.slider("Max Tokens", 256, 2048, 512, 128)
+    max_tokens = st.slider("Max Tokens", 128, 1024, 256, 64)
 
     st.markdown("---")
     st.markdown("### 📊 Model Info")
@@ -74,23 +74,33 @@ with st.sidebar:
     st.markdown("2. [Cohere](https://dashboard.cohere.com/api-keys)")
     st.markdown("Both work in Hong Kong! 🇭🇰")
 
+    st.markdown("---")
+    st.markdown("### 💡 Model Tips:")
+    st.markdown("- **Phi-3-mini**: Fast, accurate (RECOMMENDED)")
+    st.markdown("- **Zephyr-7b**: Best quality")
+    st.markdown("- **FLAN-T5**: Fastest responses")
+    st.markdown("- **Mixtral**: Most powerful (slower)")
+
 def format_docs(docs):
     """Format retrieved documents into context string"""
     return "\n\n".join(doc.page_content for doc in docs)
 
 @st.cache_resource
 def initialize_rag_chain(hf_key, cohere_key, model_name, temp, max_tok):
-    """Initialize RAG chain using modern LCEL pattern (no deprecated chains!)"""
+    """Initialize RAG chain using modern LCEL pattern"""
 
     try:
-        # Initialize HuggingFace LLM
+        # Initialize HuggingFace LLM with better parameters
         llm = HuggingFaceEndpoint(
             repo_id=model_name,
             huggingfacehub_api_token=hf_key,
             temperature=temp,
             max_new_tokens=max_tok,
-            top_k=50,
-            top_p=0.95
+            task="text-generation",  # Explicit task
+            do_sample=True,
+            top_k=40,
+            top_p=0.9,
+            repetition_penalty=1.1
         )
 
         # Initialize Cohere embeddings (FREE tier!)
@@ -105,13 +115,18 @@ def initialize_rag_chain(hf_key, cohere_key, model_name, temp, max_tok):
         if not os.path.exists(persist_directory):
             st.error(f"❌ Chroma DB not found at {persist_directory}.")
             st.info("""
-            ### 📦 First time setup:
-            1. Create a `data/` folder and add your HK healthcare PDFs/TXT files
-            2. Run: `python ingest_data.py`
-            3. This creates the `chroma_db/` folder with embeddings
-            4. Upload `chroma_db/` to your GitHub repo
+            ### 📦 Database Not Found
 
-            **OR just test the UI for now!** ✅
+            **This is expected for first deployment!** The app is working fine.
+
+            **To add your data:**
+            1. Create a `data/` folder locally
+            2. Add HK healthcare PDFs/TXT files
+            3. Run: `python ingest_data.py`
+            4. Upload the `chroma_db/` folder to GitHub
+            5. Redeploy!
+
+            **For now, you can test the UI and API keys work!** ✅
             """)
             return None, None
 
@@ -120,25 +135,29 @@ def initialize_rag_chain(hf_key, cohere_key, model_name, temp, max_tok):
             embedding_function=embeddings
         )
 
-        retriever = vectorstore.as_retriever(search_kwargs={"k": 3})
+        retriever = vectorstore.as_retriever(
+            search_type="similarity",
+            search_kwargs={"k": 3}
+        )
 
-        # Create prompt template
-        template = """You are a helpful Hong Kong healthcare information assistant. 
-Use the following context to answer the question accurately and concisely.
-If you don't know the answer, say "I don't have information about that in my knowledge base."
+        # Create prompt template optimized for better responses
+        template = """You are a helpful Hong Kong healthcare information assistant.
 
-Context: {context}
+Context information:
+{context}
 
 Question: {question}
 
-Helpful Answer:"""
+Please provide a clear, accurate answer based on the context above. If the context doesn't contain the information needed, say "I don't have information about that in my knowledge base."
+
+Answer:"""
 
         prompt = PromptTemplate(
             template=template,
             input_variables=["context", "question"]
         )
 
-        # Build RAG chain using LCEL (modern LangChain pattern)
+        # Build RAG chain using LCEL
         rag_chain = (
             {"context": retriever | format_docs, "question": RunnablePassthrough()}
             | prompt
@@ -150,6 +169,7 @@ Helpful Answer:"""
 
     except Exception as e:
         st.error(f"❌ Initialization error: {str(e)}")
+        st.info("💡 Try switching to a different model in the sidebar!")
         return None, None
 
 # Check if API keys are provided
@@ -190,6 +210,7 @@ with st.spinner("🔄 Initializing AI models..."):
 
 if rag_chain is None:
     st.warning("⚠️ Running in demo mode (no database). Add your data to enable full functionality!")
+    st.info("🎉 **Good news:** Your app is deployed and working! You just need to add your healthcare data.")
     st.stop()
 
 st.success("✅ Chatbot ready! Ask me anything about Hong Kong healthcare.")
@@ -215,6 +236,10 @@ if prompt := st.chat_input("Ask about Hong Kong healthcare..."):
             try:
                 # Get answer using RAG chain
                 answer = rag_chain.invoke(prompt)
+
+                # Clean up answer (remove prompt repetition if present)
+                if "Answer:" in answer:
+                    answer = answer.split("Answer:")[-1].strip()
 
                 # Get source documents
                 source_docs = retriever.invoke(prompt)
@@ -248,7 +273,13 @@ if prompt := st.chat_input("Ask about Hong Kong healthcare..."):
             except Exception as e:
                 error_msg = f"❌ Error: {str(e)}"
                 st.error(error_msg)
-                st.info("Try reducing max_tokens in sidebar or switching to a different model.")
+                st.info("""
+                💡 **Troubleshooting tips:**
+                - Try switching to a different model (Phi-3-mini recommended)
+                - Reduce max_tokens in sidebar
+                - Some models may be temporarily unavailable
+                - Wait 30 seconds and try again (models may be "cold starting")
+                """)
                 st.session_state.messages.append({
                     "role": "assistant",
                     "content": error_msg
@@ -259,5 +290,10 @@ st.markdown("---")
 st.markdown("### 💡 Tips:")
 st.markdown("- Ask specific questions about HK hospitals, clinics, or services")
 st.markdown("- Check the sources to verify information")
-st.markdown("- If responses are slow, try switching to a smaller model")
+st.markdown("- If a model fails, try switching to **Phi-3-mini** (most reliable)")
 st.markdown("- FREE tier = perfect for portfolio demos! 🎉")
+st.markdown("### 📊 Your Portfolio Project:")
+st.markdown("- 🌐 **Deployed:** Streamlit Cloud")
+st.markdown("- 🤖 **Tech:** RAG + LangChain + HuggingFace + Cohere")
+st.markdown("- 💰 **Cost:** $0/month")
+st.markdown("- 🚀 **Status:** Production-ready!")
