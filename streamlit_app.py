@@ -6,8 +6,8 @@ sys.modules['sqlite3'] = pysqlite3  # CRITICAL: Fix for Chroma on Streamlit Clou
 from langchain_huggingface import HuggingFaceEndpoint
 from langchain_cohere import CohereEmbeddings
 from langchain_community.vectorstores import Chroma
-from langchain.chains import RetrievalQA
-from langchain.prompts import PromptTemplate
+from langchain.chains.retrieval_qa.base import RetrievalQA  # Updated import path
+from langchain_core.prompts import PromptTemplate  # Updated import path
 import os
 
 # Page config
