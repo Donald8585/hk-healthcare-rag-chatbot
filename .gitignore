@@ -1,21 +1,34 @@
 # Python
-venv/
 __pycache__/
-*.pyc
-*.pyo
-*.pyd
+*.py[cod]
+*$py.class
+*.so
 .Python
+env/
+venv/
+ENV/
 
-# Vector DB
-chroma_db/
-
-# Data files (too large for GitHub)
-data/*.pdf
-
-# Environment
+# Environment variables (NEVER commit these!)
 .env
-*.log
+.env.local
+
+# Streamlit secrets (NEVER commit these!)
+.streamlit/secrets.toml
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
 
 # OS
 .DS_Store
 Thumbs.db
+
+# Temp files
+*.log
+*.tmp
+
+# Keep the chroma_db but ignore its contents initially
+# Uncomment the line below if chroma_db is too large for git
+# chroma_db/
