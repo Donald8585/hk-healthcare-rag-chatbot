@@ -6,8 +6,9 @@ sys.modules['sqlite3'] = pysqlite3  # CRITICAL: Fix for Chroma on Streamlit Clou
 from langchain_huggingface import HuggingFaceEndpoint
 from langchain_cohere import CohereEmbeddings
 from langchain_community.vectorstores import Chroma
-from langchain.chains.retrieval_qa.base import RetrievalQA  # Updated import path
-from langchain_core.prompts import PromptTemplate  # Updated import path
+from langchain_core.prompts import PromptTemplate
+from langchain_core.runnables import RunnablePassthrough
+from langchain_core.output_parsers import StrOutputParser
 import os
 
 # Page config
@@ -73,9 +74,13 @@ with st.sidebar:
     st.markdown("2. [Cohere](https://dashboard.cohere.com/api-keys)")
     st.markdown("Both work in Hong Kong! 🇭🇰")
 
+def format_docs(docs):
+    """Format retrieved documents into context string"""
+    return "\n\n".join(doc.page_content for doc in docs)
+
 @st.cache_resource
 def initialize_rag_chain(hf_key, cohere_key, model_name, temp, max_tok):
-    """Initialize RAG chain with HuggingFace LLM and Cohere embeddings"""
+    """Initialize RAG chain using modern LCEL pattern (no deprecated chains!)"""
 
     try:
         # Initialize HuggingFace LLM
@@ -104,17 +109,21 @@ def initialize_rag_chain(hf_key, cohere_key, model_name, temp, max_tok):
             1. Create a `data/` folder and add your HK healthcare PDFs/TXT files
             2. Run: `python ingest_data.py`
             3. This creates the `chroma_db/` folder with embeddings
-            4. Then run Streamlit again!
+            4. Upload `chroma_db/` to your GitHub repo
+
+            **OR just test the UI for now!** ✅
             """)
-            return None
+            return None, None
 
         vectorstore = Chroma(
             persist_directory=persist_directory,
             embedding_function=embeddings
         )
 
-        # Create custom prompt
-        prompt_template = """You are a helpful Hong Kong healthcare information assistant. 
+        retriever = vectorstore.as_retriever(search_kwargs={"k": 3})
+
+        # Create prompt template
+        template = """You are a helpful Hong Kong healthcare information assistant. 
 Use the following context to answer the question accurately and concisely.
 If you don't know the answer, say "I don't have information about that in my knowledge base."
 
@@ -124,25 +133,24 @@ Question: {question}
 
 Helpful Answer:"""
 
-        PROMPT = PromptTemplate(
-            template=prompt_template,
+        prompt = PromptTemplate(
+            template=template,
             input_variables=["context", "question"]
         )
 
-        # Create RetrievalQA chain
-        qa_chain = RetrievalQA.from_chain_type(
-            llm=llm,
-            chain_type="stuff",
-            retriever=vectorstore.as_retriever(search_kwargs={"k": 3}),
-            chain_type_kwargs={"prompt": PROMPT},
-            return_source_documents=True
+        # Build RAG chain using LCEL (modern LangChain pattern)
+        rag_chain = (
+            {"context": retriever | format_docs, "question": RunnablePassthrough()}
+            | prompt
+            | llm
+            | StrOutputParser()
         )
 
-        return qa_chain
+        return rag_chain, retriever
 
     except Exception as e:
         st.error(f"❌ Initialization error: {str(e)}")
-        return None
+        return None, None
 
 # Check if API keys are provided
 if not hf_api_key or not cohere_api_key:
@@ -172,7 +180,7 @@ if not hf_api_key or not cohere_api_key:
 
 # Initialize RAG chain
 with st.spinner("🔄 Initializing AI models..."):
-    qa_chain = initialize_rag_chain(
+    rag_chain, retriever = initialize_rag_chain(
         hf_api_key, 
         cohere_api_key, 
         model_choice, 
@@ -180,7 +188,8 @@ with st.spinner("🔄 Initializing AI models..."):
         max_tokens
     )
 
-if qa_chain is None:
+if rag_chain is None:
+    st.warning("⚠️ Running in demo mode (no database). Add your data to enable full functionality!")
     st.stop()
 
 st.success("✅ Chatbot ready! Ask me anything about Hong Kong healthcare.")
@@ -204,9 +213,11 @@ if prompt := st.chat_input("Ask about Hong Kong healthcare..."):
     with st.chat_message("assistant"):
         with st.spinner("🤔 Thinking..."):
             try:
-                result = qa_chain({"query": prompt})
-                answer = result["result"]
-                source_docs = result.get("source_documents", [])
+                # Get answer using RAG chain
+                answer = rag_chain.invoke(prompt)
+
+                # Get source documents
+                source_docs = retriever.invoke(prompt)
 
                 # Display answer
                 st.markdown(answer)
