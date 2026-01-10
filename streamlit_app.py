@@ -3,10 +3,9 @@ import sys
 import pysqlite3
 sys.modules['sqlite3'] = pysqlite3
 
-from langchain_huggingface import HuggingFaceEndpoint
-from langchain_cohere import CohereEmbeddings
+from langchain_cohere import ChatCohere, CohereEmbeddings
 from langchain_community.vectorstores import Chroma
-from langchain_core.prompts import PromptTemplate
+from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import RunnablePassthrough
 from langchain_core.output_parsers import StrOutputParser
 import os
@@ -18,96 +17,102 @@ st.set_page_config(
 )
 
 st.title("🏥 Hong Kong Healthcare Information Assistant")
+st.markdown("💡 **Using Cohere API (100% FREE!)** - No HuggingFace needed!")
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
 with st.sidebar:
     st.header("⚙️ Configuration")
-    st.markdown("### 🆓 100% FREE APIs")
+    st.markdown("### 🆓 Only Need ONE API Key!")
 
-    hf_api_key = st.secrets.get("HUGGINGFACE_API_KEY", "")
     cohere_api_key = st.secrets.get("COHERE_API_KEY", "")
 
-    if not hf_api_key:
-        hf_api_key = st.text_input("HuggingFace API Token", type="password")
-
     if not cohere_api_key:
-        cohere_api_key = st.text_input("Cohere API Key", type="password")
+        cohere_api_key = st.text_input(
+            "Cohere API Key", 
+            type="password",
+            help="Get FREE at dashboard.cohere.com/api-keys"
+        )
 
-    # SIMPLIFIED model list - only models that 100% work
+    # Cohere model selection
     model_choice = st.selectbox(
-        "LLM Model",
+        "Chat Model",
         [
-            "google/flan-t5-base",  # Small, fast, reliable
-            "google/flan-t5-large",
-            "HuggingFaceH4/zephyr-7b-beta"
-        ]
+            "command-light",  # Fast & FREE
+            "command",        # Better quality, still FREE
+        ],
+        help="Both models are 100% FREE!"
     )
 
-    max_tokens = st.slider("Max Tokens", 64, 512, 128, 64)
+    temperature = st.slider("Temperature", 0.0, 1.0, 0.3, 0.1)
+    max_tokens = st.slider("Max Tokens", 128, 1024, 256, 64)
 
     st.markdown("---")
-    st.markdown("### 🔑 Get FREE Keys:")
-    st.markdown("[HuggingFace Token](https://huggingface.co/settings/tokens)")
-    st.markdown("[Cohere Key](https://dashboard.cohere.com/api-keys)")
+    st.markdown("### 📊 Cohere Benefits:")
+    st.markdown("- ✅ 100% FREE tier")
+    st.markdown("- ✅ No credit card needed")
+    st.markdown("- ✅ Works in Hong Kong")
+    st.markdown("- ✅ Fast & reliable")
+    st.markdown("- ✅ 1000 API calls/month FREE")
+
+    st.markdown("---")
+    st.markdown("### 🔑 Get FREE Key:")
+    st.markdown("[Cohere Dashboard](https://dashboard.cohere.com/api-keys)")
+    st.markdown("Sign up → Copy key → Paste above!")
 
 def format_docs(docs):
     return "\n\n".join(doc.page_content for doc in docs)
 
 @st.cache_resource
-def initialize_rag_chain(hf_key, cohere_key, model_name, max_tok):
+def initialize_rag_chain(cohere_key, model_name, temp, max_tok):
     try:
-        st.info(f"🔄 Loading model: {model_name}...")
-
-        # Initialize LLM with minimal parameters
-        llm = HuggingFaceEndpoint(
-            repo_id=model_name,
-            huggingfacehub_api_token=hf_key,
-            max_new_tokens=max_tok,
-            temperature=0.3
+        # Initialize Cohere Chat LLM
+        llm = ChatCohere(
+            cohere_api_key=cohere_key,
+            model=model_name,
+            temperature=temp,
+            max_tokens=max_tok
         )
 
-        st.success(f"✅ LLM loaded: {model_name}")
+        st.success(f"✅ Cohere Chat loaded: {model_name}")
 
-        # Initialize embeddings
+        # Initialize Cohere Embeddings
         embeddings = CohereEmbeddings(
             cohere_api_key=cohere_key,
             model="embed-english-light-v3.0"
         )
 
-        st.success("✅ Embeddings loaded")
+        st.success("✅ Cohere Embeddings loaded")
 
-        # Check for vector database
+        # Check for database
         persist_directory = "./chroma_db"
 
         if not os.path.exists(persist_directory):
-            st.warning("⚠️ No database found - Running in NO-RAG mode")
+            st.warning("⚠️ No healthcare database found")
             st.info("""
-            **App is working, but has no healthcare data yet!**
+            **App works, but has no HK healthcare data yet!**
 
-            The LLM will answer directly without retrieving documents.
+            The chatbot will answer based on Cohere's general knowledge.
 
-            To add data:
-            1. Create `data/` folder locally
-            2. Add healthcare PDFs/TXTs
-            3. Run `python ingest_data.py`
-            4. Upload `chroma_db/` to GitHub
+            **To add your healthcare data:**
+            1. Locally: Create `data/` folder with PDFs/TXTs
+            2. Run: `python ingest_data.py`
+            3. Upload `chroma_db/` folder to GitHub
+            4. Redeploy!
+
+            **For now, ask general HK healthcare questions!** ✅
             """)
 
-            # Return simple LLM chain (no RAG)
-            template = """Answer this question about Hong Kong healthcare:
+            # Simple chat mode without RAG
+            prompt = ChatPromptTemplate.from_template(
+                "You are a helpful assistant. Answer this question about Hong Kong healthcare:\n\n{question}"
+            )
 
-Question: {question}
-
-Answer:"""
-
-            prompt = PromptTemplate(template=template, input_variables=["question"])
             simple_chain = prompt | llm | StrOutputParser()
-
             return simple_chain, None
 
-        # Full RAG mode if database exists
+        # Full RAG mode
         vectorstore = Chroma(
             persist_directory=persist_directory,
             embedding_function=embeddings
@@ -115,13 +120,18 @@ Answer:"""
 
         retriever = vectorstore.as_retriever(search_kwargs={"k": 3})
 
-        template = """Context: {context}
+        st.success(f"✅ Loaded {vectorstore._collection.count()} documents")
+
+        prompt = ChatPromptTemplate.from_template(
+            """Use this context to answer the question:
+
+Context:
+{context}
 
 Question: {question}
 
-Answer:"""
-
-        prompt = PromptTemplate(template=template, input_variables=["context", "question"])
+Provide a clear, accurate answer based on the context above."""
+        )
 
         rag_chain = (
             {"context": retriever | format_docs, "question": RunnablePassthrough()}
@@ -134,38 +144,47 @@ Answer:"""
         return rag_chain, retriever
 
     except Exception as e:
-        st.error(f"❌ Initialization failed: {str(e)}")
-        st.error(f"Error type: {type(e).__name__}")
+        st.error(f"❌ Error: {str(e)}")
         import traceback
-        st.code(traceback.format_exc())
+        with st.expander("🐛 Full Error"):
+            st.code(traceback.format_exc())
         return None, None
 
-if not hf_api_key or not cohere_api_key:
-    st.warning("⚠️ Please add API keys in sidebar!")
+# Check API key
+if not cohere_api_key:
+    st.warning("⚠️ Please add your Cohere API key in the sidebar!")
     st.info("""
-    ### Get FREE API Keys:
+    ### 🎉 Get FREE Cohere API Key (30 seconds):
 
-    1. **HuggingFace**: huggingface.co/settings/tokens
-    2. **Cohere**: dashboard.cohere.com/api-keys
+    1. Go to: [dashboard.cohere.com/api-keys](https://dashboard.cohere.com/api-keys)
+    2. Sign up with email (NO credit card needed!)
+    3. Copy your API key
+    4. Paste in sidebar →
 
-    Both are 100% free and work in Hong Kong!
+    **FREE tier includes:**
+    - 1000 API calls/month
+    - Both chat & embeddings
+    - Works in Hong Kong! 🇭🇰
     """)
     st.stop()
 
-# Initialize
-with st.spinner("🔄 Initializing..."):
-    chain, retriever = initialize_rag_chain(hf_api_key, cohere_api_key, model_choice, max_tokens)
+# Initialize chain
+with st.spinner("🔄 Initializing Cohere AI..."):
+    chain, retriever = initialize_rag_chain(cohere_api_key, model_choice, temperature, max_tokens)
 
 if chain is None:
-    st.error("❌ Failed to initialize. Check errors above.")
+    st.error("❌ Failed to initialize. Check error above.")
     st.stop()
 
-st.success("✅ Chatbot ready!")
+st.success("✅ Chatbot ready! Ask me about Hong Kong healthcare.")
 
 # Display chat history
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
+        if "sources" in message:
+            with st.expander("📚 View Sources"):
+                st.markdown(message["sources"])
 
 # Chat input
 if prompt := st.chat_input("Ask about HK healthcare..."):
@@ -177,38 +196,59 @@ if prompt := st.chat_input("Ask about HK healthcare..."):
     with st.chat_message("assistant"):
         with st.spinner("🤔 Thinking..."):
             try:
-                # Invoke chain
                 answer = chain.invoke(prompt)
 
-                # Clean up
-                if "Answer:" in answer:
-                    answer = answer.split("Answer:")[-1].strip()
-
                 st.markdown(answer)
-                st.session_state.messages.append({"role": "assistant", "content": answer})
+
+                # Get sources if retriever exists
+                if retriever:
+                    try:
+                        source_docs = retriever.invoke(prompt)
+
+                        if source_docs:
+                            sources_text = "### 📄 Sources:\n\n"
+                            for i, doc in enumerate(source_docs, 1):
+                                source = doc.metadata.get("source", "Unknown")
+                                preview = doc.page_content[:150] + "..."
+                                sources_text += f"**{i}. {source}**\n```\n{preview}\n```\n\n"
+
+                            with st.expander("📚 View Sources"):
+                                st.markdown(sources_text)
+
+                            st.session_state.messages.append({
+                                "role": "assistant",
+                                "content": answer,
+                                "sources": sources_text
+                            })
+                    except:
+                        st.session_state.messages.append({"role": "assistant", "content": answer})
+                else:
+                    st.session_state.messages.append({"role": "assistant", "content": answer})
 
             except Exception as e:
                 error_msg = f"❌ Error: {str(e)}"
                 st.error(error_msg)
-                st.error(f"Error type: {type(e).__name__}")
 
-                # Show full traceback for debugging
                 import traceback
                 with st.expander("🐛 Full Error Details"):
                     st.code(traceback.format_exc())
 
                 st.info("""
-                💡 **Try these fixes:**
-                1. Wait 60 seconds and try again (model cold start)
-                2. Switch to "google/flan-t5-base" (most reliable)
-                3. Check your API keys are valid
-                4. Try a simpler question: "What is healthcare?"
+                💡 **Troubleshooting:**
+                - Check your Cohere API key is valid
+                - Try "command-light" model (faster)
+                - Reduce max tokens to 128
+                - Wait 30 seconds and try again
                 """)
 
                 st.session_state.messages.append({"role": "assistant", "content": error_msg})
 
 st.markdown("---")
-st.markdown("### 💡 Troubleshooting:")
-st.markdown("- **Silent error?** Switch to flan-t5-base model")
-st.markdown("- **Timeout?** Wait 60 seconds, try again")
-st.markdown("- **Still failing?** Check error details above")
+st.markdown("### ✨ Why Cohere?")
+st.markdown("- 🚀 **Faster** than HuggingFace free tier")
+st.markdown("- ✅ **More reliable** - no cold starts")
+st.markdown("- 💰 **100% FREE** - 1000 calls/month")
+st.markdown("- 🌍 **Works in Hong Kong** - no VPN needed")
+st.markdown("### 🎯 Your Portfolio Project:")
+st.markdown("**Tech Stack:** Cohere AI + LangChain + Streamlit + ChromaDB")
+st.markdown("**Cost:** $0/month | **Status:** Production-ready! 🎉")
