@@ -1,3 +1,15 @@
+---
+title: HK Healthcare RAG Chatbot
+emoji: 🏥
+colorFrom: blue
+colorTo: green
+sdk: streamlit
+sdk_version: 1.32.0
+app_file: app.py
+pinned: false
+license: mit
+short_description: Hong Kong Healthcare RAG chatbot powered by Cohere AI
+---
 # HK Healthcare RAG Chatbot 🏥
 
 A **production-ready** Retrieval-Augmented Generation (RAG) chatbot built with LangChain, Chroma vector database, and Ollama LLM. Provides intelligent Q&A over Hong Kong healthcare policy documents, statistics, and facility information.
